@@ -1,0 +1,74 @@
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+
+# ─── Secrets & environment ───────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# Private key and certificate files — never commit these
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# ─── Docker ──────────────────────────────────────────────────────────────────
+# Do not commit generated compose lock files
+docker-compose.override.yml
+
+# ─── Helm ────────────────────────────────────────────────────────────────────
+helm/charts/
+helm/*.lock
+
+# ─── Kubernetes ──────────────────────────────────────────────────────────────
+kubeconfig
+*.kubeconfig
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Logs & temporary files ──────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+tmp/
+temp/
+
+# ─── Node (Open WebUI tooling, if any) ───────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ─── Local data volumes (never version-control database data) ────────────────
+data/
+volumes/
+postgres_data/
+neo4j_data/
+ollama_data/
+chroma_data/

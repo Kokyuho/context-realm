@@ -1,0 +1,86 @@
+# =============================================================================
+# LiteLLM Model Router Configuration
+# =============================================================================
+# Add or remove models freely. Open WebUI will list all model_name values
+# as selectable options in the model dropdown.
+#
+# API keys are read from environment variables — never hardcode them here.
+# Full provider reference: https://docs.litellm.ai/docs/providers
+# =============================================================================
+
+model_list:
+  # ── Anthropic (Claude) ────────────────────────────────────────────────────
+  - model_name: claude-opus
+    litellm_params:
+      model: anthropic/claude-opus-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-3-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── OpenAI ────────────────────────────────────────────────────────────────
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ── Google (Gemini) ───────────────────────────────────────────────────────
+  - model_name: gemini-2-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2-pro
+    litellm_params:
+      model: gemini/gemini-2.0-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ── xAI (Grok) ────────────────────────────────────────────────────────────
+  - model_name: grok-3
+    litellm_params:
+      model: xai/grok-3
+      api_key: os.environ/GROK_API_KEY
+
+  - model_name: grok-3-mini
+    litellm_params:
+      model: xai/grok-3-mini
+      api_key: os.environ/GROK_API_KEY
+
+  # ── Local (Ollama) ────────────────────────────────────────────────────────
+  # Uncomment and set OLLAMA_LLM_MODEL in .env to enable a local model.
+  # The Ollama URL is picked up automatically from OLLAMA_BASE_URL.
+  #
+  # - model_name: local
+  #   litellm_params:
+  #     model: ollama/qwen2.5:7b
+  #     api_base: os.environ/OLLAMA_BASE_URL
+
+# =============================================================================
+# Global LiteLLM settings
+# =============================================================================
+litellm_settings:
+  # Drop unsupported parameters instead of erroring (e.g. stop sequences)
+  drop_params: true
+  # Enable request/response logging (disable in production if logs are verbose)
+  set_verbose: false
+  # Retry failed requests up to 2 times before returning an error
+  num_retries: 2
+  # Timeout per request in seconds
+  request_timeout: 60
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Store usage data in SQLite for the spend tracking UI
+  database_url: 'sqlite:////data/litellm.db'

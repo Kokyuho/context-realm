@@ -1,0 +1,9 @@
+# This directory will contain the Mem0 server Dockerfile (Phase 2).
+
+#
+
+# The Mem0 source code is NOT stored in this repository.
+
+# It is cloned from upstream inside the Docker build context.
+
+# See the implementation plan in docs/ for details.
