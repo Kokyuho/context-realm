@@ -82,5 +82,6 @@ litellm_settings:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-  # Store usage data in SQLite for the spend tracking UI
-  database_url: 'sqlite:////data/litellm.db'
+  # Spend tracking — stored in the dedicated 'litellm' PostgreSQL database.
+  # Prisma requires the standard postgresql:// scheme (not postgresql+psycopg://).
+  database_url: os.environ/LITELLM_DATABASE_URL

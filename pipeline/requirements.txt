@@ -1,0 +1,3 @@
+# Runtime dependencies for the mem0_filter pipeline.
+# httpx is used for async HTTP calls to the Mem0 server (Phase 5).
+httpx>=0.27.0

@@ -1,0 +1,221 @@
+# =============================================================================
+# ContextRealm — Local Development Compose
+# =============================================================================
+# Start the full stack:
+#   docker compose build
+#   docker compose up -d
+#
+# Then run first-time setup:
+#   bash scripts/setup.sh
+#
+# For production deployment see docker-compose.prod.yml and docs/setup.md.
+# =============================================================================
+
+name: contextrealm
+
+networks:
+  # All services communicate on this internal bridge network.
+  # Only open-webui binds a host port — everything else is internal only.
+  internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  ollama_data:
+  open_webui_data:
+  litellm_data:
+  mem0_history:
+
+services:
+  # ── Chat UI ─────────────────────────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - '3000:8080'
+    environment:
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      # Use the local Ollama instance for document RAG embeddings
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      - internal
+    depends_on:
+      litellm:
+        condition: service_healthy
+      pipelines:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Model router ─────────────────────────────────────────────────────────────
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ['--config', '/litellm_config.yaml', '--port', '4000']
+    ports:
+      - '4000:4000'
+    volumes:
+      - ./config/litellm_config.yaml:/litellm_config.yaml:ro
+      - litellm_data:/data
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GROK_API_KEY: ${GROK_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      # Prisma requires postgresql:// (not postgresql+psycopg://) for spend tracking.
+      LITELLM_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/litellm
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── Memory pipeline ──────────────────────────────────────────────────────────
+  pipelines:
+    build:
+      context: ./pipeline
+    environment:
+      MEM0_API_URL: http://mem0:8000
+      MEM0_API_KEY: ${MEM0_ADMIN_API_KEY}
+      MEM0_USER_ID: ${MEM0_USER_ID:-default}
+      PIPELINES_API_KEY: ${PIPELINES_API_KEY}
+    networks:
+      - internal
+    depends_on:
+      mem0:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Memory engine ─────────────────────────────────────────────────────────────
+  mem0:
+    build:
+      context: ./docker/mem0-server
+      args:
+        MEM0_VERSION: ${MEM0_VERSION}
+    environment:
+      # Postgres connection — v2.0.2 reads DATABASE_URL; individual POSTGRES_*
+      # vars are kept as fallback but DATABASE_URL takes precedence.
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mem0_app}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: ${POSTGRES_DB:-mem0_app}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Auth (v2.0.2+)
+      JWT_SECRET: ${MEM0_JWT_SECRET}
+      ADMIN_API_KEY: ${MEM0_ADMIN_API_KEY}
+      AUTH_DISABLED: ${MEM0_AUTH_DISABLED:-false}
+      # Embedder — override upstream's OpenAI default with local Ollama
+      MEM0_DEFAULT_EMBEDDER_PROVIDER: ollama
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+      # LLM for memory extraction (set MEM0_LLM_PROVIDER + MEM0_LLM_API_KEY in .env)
+      MEM0_DEFAULT_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-openai}
+      MEM0_LLM_API_KEY: ${MEM0_LLM_API_KEY:-}
+      # Disable anonymous telemetry
+      MEM0_TELEMETRY: 'false'
+      # CORS: allow requests from Open WebUI
+      DASHBOARD_URL: http://localhost:3000
+    volumes:
+      - mem0_history:/app/history
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+
+  # ── Vector store ──────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mem0_app}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ${POSTGRES_DB:-mem0_app}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Knowledge graph ───────────────────────────────────────────────────────────
+  # Neo4j adds relationship-aware memory to Mem0. It is started here but graph
+  # store configuration is applied separately via the Mem0 /configure endpoint.
+  # Memory limits are tuned for a 4 GB host — adjust via .env if you have more RAM.
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_server_memory_heap_initial__size:-256m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_server_memory_heap_max__size:-512m}
+      NEO4J_server_memory_pagecache__size: ${NEO4J_server_memory_pagecache__size:-256m}
+      NEO4J_server_memory_off__heap_transaction_max__size: ${NEO4J_server_memory_off__heap_transaction_max__size:-128m}
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # ── Local embeddings + optional LLM ──────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # ── MCP server (optional) ─────────────────────────────────────────────────────
+  # Exposes the Mem0 store as an MCP endpoint for Claude Desktop / Claude Code.
+  # Uncomment to enable, then add http://localhost:8765/sse to your MCP config.
+  #
+  # openmemory-mcp:
+  #   image: skpassegna/openmemory-mcp:latest
+  #   ports:
+  #     - "8765:8765"
+  #   environment:
+  #     MEM0_API_URL: http://mem0:8000
+  #     MEM0_API_KEY: ${MEM0_ADMIN_API_KEY}
+  #   networks:
+  #     - internal
+  #   depends_on:
+  #     mem0:
+  #       condition: service_healthy
+  #   restart: unless-stopped
