@@ -89,6 +89,14 @@ Pipelines reload automatically when the mounted file changes.
 
 ### Running lints
 
+First-time setup — install the dev tooling into your local environment. The same file is what CI installs, so what works locally will work in the PR gate.
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Then, at any time:
+
 ```bash
 # Python (pipeline + scripts + tests)
 ruff check pipeline/ scripts/ tests/ pyproject.toml
