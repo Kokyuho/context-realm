@@ -1,0 +1,88 @@
+# =============================================================================
+# ContextRealm — Test workflow
+# =============================================================================
+# Runs lint and unit tests on every push and PR.
+# Integration tests are intentionally NOT run on PRs — they need the full
+# Docker stack and the Ollama embedding model. Trigger them manually from
+# the Actions tab (workflow_dispatch) before a release.
+# =============================================================================
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run integration tests (requires Docker stack with Ollama embedding model)'
+        type: boolean
+        default: false
+
+jobs:
+  lint-and-unit:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff check
+        run: ruff check pipeline/ scripts/ tests/ pyproject.toml
+
+      - name: Ruff format check
+        run: ruff format --check pipeline/ scripts/ tests/ pyproject.toml
+
+      - name: Pytest (unit)
+        run: pytest
+
+  integration:
+    name: Integration tests (manual)
+    runs-on: ubuntu-latest
+    # Only run when the workflow is dispatched with the integration flag.
+    # This job is intentionally separate from the PR gate because it needs
+    # docker compose up + the embedding model pulled.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Integration tests need a live Mem0 + Ollama + Postgres stack. We use
+      # the host Docker daemon because the GitHub runner already has it.
+      # This step is best-effort; if the Docker build fails (e.g. MEM0_VERSION
+      # upstream tag has moved) we still want the lint job to be green.
+      - name: Create .env for tests
+        run: |
+          cp .env.example .env
+          sed -i 's/^MEM0_AUTH_DISABLED=.*/MEM0_AUTH_DISABLED=true/' .env
+
+      - name: Start the stack
+        run: docker compose up -d
+        # Give Mem0 + Ollama a moment to come up; the healthcheck handles it.
+
+      - name: Run setup (pull embedding model, enable pgvector)
+        run: bash scripts/setup.sh
+
+      - name: Pytest (integration)
+        run: pytest --integration
+        env:
+          MEM0_TEST_BASE_URL: http://localhost:8000

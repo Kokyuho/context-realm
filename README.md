@@ -84,6 +84,9 @@ bash scripts/setup.sh
 
 # Open the UI
 open http://localhost:3000
+
+# Run the test suite (unit tests by default; --integration for live Mem0 checks)
+bash scripts/test.sh
 ```
 
 → Full walkthrough in [docs/setup.md](docs/setup.md)
@@ -146,7 +149,9 @@ context-realm/
 │   └── litellm_config.yaml # Model router configuration
 ├── scripts/
 │   ├── setup.sh            # Pull Ollama models, enable pgvector
+│   ├── test.sh             # Test runner wrapper around pytest
 │   └── import_context.py   # Bulk knowledge import tool
+├── tests/                  # Test suite (unit + integration)
 ├── helm/                   # Kubernetes Helm chart for multi-realm deployment
 ├── docs/
 │   ├── architecture.md
@@ -154,6 +159,8 @@ context-realm/
 │   └── contributing.md
 ├── docker-compose.yml      # Local development
 ├── docker-compose.prod.yml # Production overrides
+├── pyproject.toml          # Test + lint configuration
+├── requirements-dev.txt    # Dev-only Python deps (pytest, ruff, httpx)
 └── .env.example
 ```
 

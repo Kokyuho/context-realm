@@ -1,0 +1,18 @@
+# =============================================================================
+# ContextRealm — Development dependencies
+# =============================================================================
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# These supplement the per-component runtime requirements (e.g.
+# pipeline/requirements.txt). They are NOT shipped in any Docker image.
+# =============================================================================
+
+# ─── Test framework ──────────────────────────────────────────────────────────
+# pytest is the runner. httpx is reused from pipeline/requirements.txt — it
+# doubles as the HTTP client for integration tests against the live Mem0 REST
+# API. pytest-asyncio lets pipeline tests use the same `async def` style
+# they would in production code.
+pytest>=8.0
+pytest-asyncio>=0.23
+httpx>=0.27.0
