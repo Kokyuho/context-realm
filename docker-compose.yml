@@ -26,6 +26,8 @@ volumes:
   open_webui_data:
   litellm_data:
   mem0_history:
+  caddy_data:
+  caddy_config:
 
 services:
   # ── Chat UI ─────────────────────────────────────────────────────────────────
@@ -202,20 +204,55 @@ services:
       - internal
     restart: unless-stopped
 
-  # ── MCP server (optional) ─────────────────────────────────────────────────────
-  # Exposes the Mem0 store as an MCP endpoint for Claude Desktop / Claude Code.
-  # Uncomment to enable, then add http://localhost:8765/sse to your MCP config.
+  # ── MCP server (internal only) ──────────────────────────────────────────────
+  # A small in-tree Python service that exposes the Mem0 store over the
+  # Model Context Protocol. Two tools: ``search_memories`` and ``add_memory``.
+  # Source: mcp_server/ — see that directory for implementation.
   #
-  # openmemory-mcp:
-  #   image: skpassegna/openmemory-mcp:latest
-  #   ports:
-  #     - "8765:8765"
-  #   environment:
-  #     MEM0_API_URL: http://mem0:8000
-  #     MEM0_API_KEY: ${MEM0_ADMIN_API_KEY}
-  #   networks:
-  #     - internal
-  #   depends_on:
-  #     mem0:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  # Bound to the internal network only; the only path in is through the
+  # Caddy sidecar below, which terminates TLS and is the public entry point.
+  # Auth is the same admin token Mem0 uses (Authorization: Token <key>);
+  # the middleware rejects requests without it.
+  mcp:
+    build:
+      context: ./mcp_server
+    environment:
+      MEM0_API_URL: http://mem0:8000
+      MEM0_USER_ID: ${MEM0_USER_ID:-default}
+      # Same token Mem0 enforces; do not change independently.
+      MEM0_ADMIN_API_KEY: ${MEM0_ADMIN_API_KEY:-}
+    networks:
+      - internal
+    depends_on:
+      mem0:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── TLS termination ────────────────────────────────────────────────────────
+  # Caddy auto-issues and renews a Let's Encrypt certificate when
+  # REALM_DOMAIN is set in .env. With REALM_DOMAIN blank, Caddy serves a
+  # self-signed cert on https://localhost:8443 — useful for local-only use.
+  # Ports 80 and 443 are the only ones exposed publicly.
+  #
+  # The entrypoint script (scripts/caddy-entrypoint.sh) generates the
+  # runtime Caddyfile based on REALM_DOMAIN. The static Caddyfile at the
+  # repo root is the documentation for what gets generated; the
+  # container writes the actual config to /etc/caddy/Caddyfile.runtime.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      REALM_DOMAIN: ${REALM_DOMAIN:-}
+    entrypoint: ["sh", "/usr/local/bin/caddy-entrypoint.sh"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./scripts/caddy-entrypoint.sh:/usr/local/bin/caddy-entrypoint.sh:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      - mcp

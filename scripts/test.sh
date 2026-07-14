@@ -64,10 +64,10 @@ done
 # ─── lint (optional) ──────────────────────────────────────────────────────────
 if [ "${RUN_LINT}" -eq 1 ]; then
     info "Running ruff check"
-    ruff check pipeline/ scripts/ tests/ pyproject.toml
+    ruff check pipeline/ scripts/ tests/ mcp_server/ pyproject.toml
 
     info "Running ruff format --check"
-    ruff format --check pipeline/ scripts/ tests/ pyproject.toml
+    ruff format --check pipeline/ scripts/ tests/ mcp_server/ pyproject.toml
 fi
 
 # ─── pytest ───────────────────────────────────────────────────────────────────

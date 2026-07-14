@@ -1,17 +1,16 @@
 # =============================================================================
-# ContextRealm — Project configuration
+# pyproject.toml — single source of truth for tool config
 # =============================================================================
-# Centralises test runner and linter configuration. Keep this file in sync
-# with the conventions documented in docs/contributing.md.
+# Keeping every linter/formatter/test setting in this file means
+# `pip install -r requirements-dev.txt && ruff check . && pytest` is the
+# only command needed for a clean local run.
 # =============================================================================
 
 [project]
 name = "context-realm"
 version = "0.1.0"
-description = "Self-hosted, private AI knowledge engine"
+description = "A self-hosted, private AI knowledge engine. Each instance is a Realm — a contained knowledge universe for a person, project, or fictional world."
 requires-python = ">=3.11"
-# Runtime dependencies are declared per-component (see pipeline/requirements.txt).
-# This file is for tooling config only.
 
 # ─── Pytest ──────────────────────────────────────────────────────────────────
 # Conventions:
@@ -19,9 +18,11 @@ requires-python = ">=3.11"
 #   * Integration tests live in tests/integration/ — require the Docker stack.
 #     They are skipped by default and run with `pytest --integration` or
 #     `bash scripts/test.sh --integration`.
+#   * Component-scoped tests live alongside the component (e.g. mcp_server/tests/).
+#     Same conventions apply: pure-Python unit tests only, no live services.
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
+testpaths = ["tests", "mcp_server/tests", "scripts/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

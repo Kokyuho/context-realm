@@ -16,6 +16,22 @@
 pytest>=8.0
 pytest-asyncio>=0.23
 httpx>=0.27.0
+# pydantic is a runtime dep of the Open WebUI Pipelines image (so it ships
+# inside that container). We re-declare it here so unit tests can import
+# pipeline/mem0_filter.py on the host without rebuilding an image.
+pydantic>=2.0
+# frontmatter is a runtime dep of scripts/import_context.py. We re-declare
+# it here so unit tests can import the script and exercise the chunker and
+# frontmatter-handling code without having to install scripts/requirements.
+python-frontmatter>=1.1
+
+# ─── MCP server deps ─────────────────────────────────────────────────────────
+# Needed to import mcp_server/server.py in unit tests. They are also the
+# production runtime deps declared in mcp_server/requirements.txt; we
+# re-declare them so `bash scripts/test.sh` works on a clean checkout.
+mcp>=1.8,<2.0
+uvicorn>=0.30,<1.0
+starlette>=0.40
 
 # ─── Linter ──────────────────────────────────────────────────────────────────
 # Pinned to a minor version so local installs and CI agree. Bump deliberately

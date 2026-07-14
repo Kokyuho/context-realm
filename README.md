@@ -110,19 +110,24 @@ Each realm gets its own subdomain (`personal.contextrealm.yourdomain.com`), isol
 
 → See [docs/setup.md#production-deployment](docs/setup.md#production-deployment)
 
-## MCP — Claude Desktop / Claude Code
+## MCP — any MCP-compatible client
 
-Expose your memory to Claude via the OpenMemory MCP server. Add to `claude_desktop_config.json`:
+Expose your memory to Claude Desktop, Claude Code, Cursor, or any other MCP-compatible client via the in-tree MCP server (`mcp_server/`). TLS is handled by a Caddy sidecar in `docker-compose.yml`: set `REALM_DOMAIN=mcp.yourdomain.com` in `.env` and Let's Encrypt certs are issued automatically. Add to your MCP client config (replace `<REALM_DOMAIN>` and `<MEM0_ADMIN_API_KEY>`):
 
 ```json
 {
   "mcpServers": {
     "contextrealm": {
-      "url": "http://localhost:8765/sse"
+      "url": "https://<REALM_DOMAIN>/mcp",
+      "headers": {
+        "Authorization": "Token <MEM0_ADMIN_API_KEY>"
+      }
     }
   }
 }
 ```
+
+The MCP service exposes two tools: `search_memories(query)` and `add_memory(text)`. The admin token is the only access control — share it with collaborators you trust with the Realm's memories.
 
 → See [docs/setup.md#mcp-configuration](docs/setup.md#mcp-configuration)
 

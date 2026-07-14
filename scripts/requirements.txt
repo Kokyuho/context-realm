@@ -1,0 +1,16 @@
+# =============================================================================
+# ContextRealm — Import script runtime dependencies
+# =============================================================================
+# Install locally with:
+#   pip install -r scripts/requirements.txt
+#
+# These are needed only when running scripts/import_context.py directly on
+# the host. They are NOT shipped in any Docker image — the import script is
+# an operator tool, not a service.
+# =============================================================================
+
+# HTTP client for talking to the Mem0 REST API.
+httpx>=0.27.0
+
+# YAML frontmatter parsing for markdown files. Pure-Python; only requires PyYAML.
+python-frontmatter>=1.1

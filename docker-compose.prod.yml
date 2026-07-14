@@ -46,3 +46,13 @@ services:
 
   ollama:
     restart: always
+
+  # MCP server stays internal-only in production — only Caddy is public.
+  # Caddy auto-issues a Let's Encrypt cert when REALM_DOMAIN is set in .env;
+  # if REALM_DOMAIN is blank, Caddy serves a self-signed cert on
+  # https://localhost:8443 for local-only use.
+  mcp:
+    restart: always
+
+  caddy:
+    restart: always

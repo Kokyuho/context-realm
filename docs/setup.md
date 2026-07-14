@@ -187,31 +187,178 @@ Options:
 
 ## MCP Configuration
 
-The OpenMemory MCP service exposes ContextRealm memories to Claude Desktop and Claude Code via the [Model Context Protocol](https://modelcontextprotocol.io/).
+ContextRealm exposes the Mem0 store over the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible client (Claude Desktop, Claude Code, Cursor, your own scripts) can read and write the Realm's memory directly. Two tools are exposed:
 
-### Enable in Docker Compose
+| Tool | Purpose |
+| --- | --- |
+| `search_memories(query, limit=5)` | Semantic search over the Realm's Mem0 store |
+| `add_memory(text)` | Store a single fact; Mem0's extraction LLM deduplicates |
 
-Uncomment the `openmemory-mcp` service in `docker-compose.yml`.
+The endpoint lives at `/mcp` (Streamable HTTP — the modern MCP transport) and `/sse` (SSE — kept for older clients). Both share the same auth and the same backing service.
 
-### Configure Claude Desktop
+### Architecture
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+```
+internet ──▶ Caddy (TLS, :443 / :80)
+                  │
+                  ▼  (internal compose network)
+              mcp (mcp_server/server.py, :8765)
+                  │
+                  ▼  forwards Authorization header
+                Mem0 (:8000)
+```
+
+Caddy is a sidecar in `docker-compose.yml` that terminates TLS and is the only service with publicly bound ports. The MCP service itself binds to the internal network only, so the only path in is through Caddy. Auth is a single admin token — `MEM0_ADMIN_API_KEY` — that clients pass as `Authorization: Token <value>`. The same value is presented to Mem0 on every upstream call, so the MCP layer and the Mem0 layer share one gate.
+
+### Deployment modes
+
+The Caddyfile adapts to two modes based on whether `REALM_DOMAIN` is set:
+
+#### Production / VPS — `REALM_DOMAIN=mcp.yourdomain.com`
+
+Caddy auto-requests a Let's Encrypt certificate and serves HTTPS on `:443`. Your client config:
 
 ```json
 {
   "mcpServers": {
     "contextrealm": {
-      "url": "http://localhost:8765/sse"
+      "url": "https://mcp.yourdomain.com/mcp",
+      "headers": {
+        "Authorization": "Token <MEM0_ADMIN_API_KEY>"
+      }
     }
   }
 }
 ```
 
-Restart Claude Desktop. You should see "contextrealm" in the MCP servers list.
+`/sse` works at the same hostname for older clients (`https://mcp.yourdomain.com/sse`).
 
-### Verify the connection
+#### Local-only — `REALM_DOMAIN=` (blank)
 
-Ask Claude: _"What do you know about me?"_ — it should query your Mem0 store and return memories.
+Caddy serves a self-signed cert on `https://localhost:8443`. Useful for testing the full TLS path on a single machine without pointing a real domain at your laptop. Browsers will warn; MCP clients that don't pin certificates will work normally.
+
+```json
+{
+  "mcpServers": {
+    "contextrealm": {
+      "url": "https://localhost:8443/mcp",
+      "headers": {
+        "Authorization": "Token <MEM0_ADMIN_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+### Bring up the stack
+
+```bash
+docker compose up -d mcp caddy
+```
+
+Both wait on `mem0` being healthy, so on a fresh stack they appear after ~30 seconds.
+
+Verify:
+
+```bash
+# Caddy is up and TLS works
+curl -i https://localhost:8443/health       # local: 200 with self-signed cert warning
+curl -i https://mcp.yourdomain.com/health    # production: 200, valid cert
+
+# MCP endpoint rejects requests without the token
+curl -i https://mcp.yourdomain.com/mcp       # → 401
+
+# MCP endpoint accepts requests with the token (HTTP 200 with the protocol's
+# own greeting; what follows depends on the client)
+curl -i -H "Authorization: Token <MEM0_ADMIN_API_KEY>" \
+     https://mcp.yourdomain.com/mcp
+```
+
+### Configure a client
+
+All clients take the same shape: a URL pointing at the MCP endpoint, plus an `Authorization` header carrying the admin token.
+
+#### Claude Desktop
+
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "contextrealm": {
+      "url": "https://mcp.yourdomain.com/mcp",
+      "headers": {
+        "Authorization": "Token <MEM0_ADMIN_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+#### Claude Code (CLI)
+
+`~/.claude.json` or a project-level `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "contextrealm": {
+      "url": "https://mcp.yourdomain.com/mcp",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Token <MEM0_ADMIN_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+#### Cursor
+
+**Settings → Cursor Settings → MCP → Add new global MCP server**:
+
+- **Name:** `contextrealm`
+- **Type:** `http`
+- **URL:** `https://mcp.yourdomain.com/mcp`
+- **Headers:** `Authorization: Token <MEM0_ADMIN_API_KEY>`
+
+### Threat model
+
+This is a single-token, single-tenant design. The threat model is:
+
+| Threat | Mitigated? | How |
+| --- | --- | --- |
+| Network eavesdropping on the wire | **Yes** | TLS via Caddy + Let's Encrypt |
+| Opportunistic port scanning | **Yes** | Only `:80` and `:443` are public; MCP binds to internal network only |
+| Random internet attacker guessing the token | **Yes** | 32-byte random token; brute force is infeasible |
+| A user with the token reading all Realm memories | **By design** | The token holder is a Realm collaborator; you shared it deliberately |
+| A user with the token writing junk memories | **No mitigation** | The token holder is trusted; rotate the token if needed |
+| Token leaked in a screenshot, repo, or chat | **Operational** | Rotate `MEM0_ADMIN_API_KEY` in `.env` and restart the stack |
+
+If you need per-user memory isolation, audit logs, or scoped tokens, those are v2 features — see `docs/architecture.md` for the roadmap.
+
+### Rotating the admin token
+
+```bash
+# 1. Generate a new token
+openssl rand -hex 32
+
+# 2. Edit .env — set MEM0_ADMIN_API_KEY=<new-token>
+$EDITOR .env
+
+# 3. Restart the stack so MCP and Mem0 pick up the new value
+docker compose up -d mem0 mcp
+```
+
+All clients must update their `Authorization` header. Old token stops working immediately.
+
+### Troubleshooting
+
+- **`curl /mcp` returns 401** — the token is missing or wrong. Confirm the exact value of `MEM0_ADMIN_API_KEY` in `.env` matches what's in your client config. A trailing newline from a copy-paste is the usual culprit.
+- **Caddy won't get a cert on first boot** — make sure DNS for `REALM_DOMAIN` resolves to your server's public IP, and that ports 80 and 443 are open in your firewall. Caddy needs port 80 reachable for the HTTP-01 ACME challenge.
+- **`curl https://...` returns a self-signed cert warning in production** — `REALM_DOMAIN` is unset or doesn't match the request hostname. Check `.env`.
+- **No memories returned for the user** — the default user is `MEM0_USER_ID` (defaults to `default`). Memories created with `import_context.py --user alice` are stored under `alice` and not visible to the default user. Set `MEM0_USER_ID` in `.env` to the same `user_id` you used to write the memories.
+- **MCP client times out connecting** — the most common cause is the client not trusting the self-signed cert in local-only mode. Production clients pointing at a Let's Encrypt cert should not see this.
 
 ---
 

@@ -113,11 +113,15 @@ Optionally run a local LLM (e.g., `qwen2.5:7b`) exposed through LiteLLM as a fal
 
 In production (K8s), Ollama runs on a separate CPU VM rather than inside the cluster, shared across all Realms.
 
-### OpenMemory MCP _(optional)_
+### MCP Server
 
-**Role:** Expose ContextRealm memories as an MCP server.
+**Role:** Expose ContextRealm memories over the Model Context Protocol.
 
-A thin wrapper around the Mem0 REST API that implements the [Model Context Protocol](https://modelcontextprotocol.io/). Once running, Claude Desktop and Claude Code can query and update memories without going through Open WebUI.
+A small in-tree Python service (`mcp_server/`) that wraps Mem0's REST API behind two MCP tools: `search_memories(query, limit=5)` and `add_memory(text)`. It speaks Streamable HTTP at `/mcp` (the modern MCP transport) and SSE at `/sse` for older clients. Auth is a single admin token — `MEM0_ADMIN_API_KEY` — that the service enforces via a Starlette middleware before forwarding each request to Mem0 with the same credentials.
+
+The MCP service binds to the internal compose network only. The only public entry point is a Caddy sidecar in `docker-compose.yml` that terminates TLS, auto-issues a Let's Encrypt certificate when `REALM_DOMAIN` is set, and reverse-proxies to the MCP service. With `REALM_DOMAIN` blank, Caddy serves a self-signed cert on `https://localhost:8443` for local use.
+
+This is a single-tenant, single-token design: anyone with the admin token can read and write the Realm's memories. It matches the README definition of a Realm — one person, one project, or one small trusted group.
 
 → Configuration: [docs/setup.md#mcp-configuration](setup.md#mcp-configuration)
 
@@ -176,12 +180,13 @@ python scripts/import_context.py --file doc.md --user default --tag projects
 
 ## Network Topology
 
-All services communicate on an internal Docker bridge network (`contextrealm`). The host machine exposes only two ports by default:
+All services communicate on an internal Docker bridge network (`contextrealm`). The host machine exposes the following ports by default:
 
-| Port   | Service        | Notes                                                     |
-| ------ | -------------- | --------------------------------------------------------- |
-| `3000` | Open WebUI     | Primary UI — put behind HTTPS reverse proxy in production |
-| `8765` | OpenMemory MCP | MCP endpoint — expose only for local Claude Desktop use   |
+| Port   | Service        | Notes                                                                                                                          |
+| ------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `3000` | Open WebUI     | Primary UI — put behind HTTPS reverse proxy in production                                                                     |
+| `80`   | Caddy (TLS)    | HTTP-01 ACME challenge only; permanent redirects to HTTPS                                                                       |
+| `443`  | Caddy (TLS)    | Public MCP endpoint. Caddy auto-cert via Let's Encrypt when `REALM_DOMAIN` is set; self-signed on `localhost:8443` otherwise |
 
 All backend ports are internal only:
 
@@ -190,6 +195,7 @@ All backend ports are internal only:
 | `4000`        | LiteLLM              |
 | `9099`        | Pipelines            |
 | `8000`        | Mem0 Server          |
+| `8765`        | MCP Server           |
 | `5432`        | Postgres             |
 | `7687`        | Neo4j (Bolt)         |
 | `7474`        | Neo4j (HTTP browser) |
@@ -228,4 +234,4 @@ This means a second Realm costs roughly the incremental memory and storage for N
 | Graph store    | Neo4j                              | Best-in-class for relationship queries; official Docker image; Mem0 native support |
 | Embedder       | Ollama + `qwen3-embedding:0.6b`    | Free, local, fast; no external embedding API; < 500 MB                             |
 | Infrastructure | Docker Compose (dev) + Helm (prod) | Proven patterns; easily auditable; no vendor lock-in                               |
-| MCP            | OpenMemory MCP                     | Turns Mem0 into an MCP server with zero custom code                                |
+| MCP            | In-tree `mcp_server/` + Caddy       | Two tools (search, add) over Mem0; TLS handled inside the stack via Caddy        |
