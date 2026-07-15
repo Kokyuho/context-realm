@@ -78,7 +78,9 @@ cd "${REPO_ROOT}"
 if [ "${RUN_INTEGRATION}" -eq 1 ]; then
     info "Running unit + integration tests"
     ok "Integration tests require the Docker stack: docker compose up -d"
-    pytest tests/ "${PYTEST_ARGS[@]+"${PYTEST_ARGS[@]}"}"
+    # Override the default `-m not integration` addopt so the integration
+    # suite actually executes when --integration is passed.
+    pytest -m "" tests/ "${PYTEST_ARGS[@]+"${PYTEST_ARGS[@]}"}"
 else
     info "Running unit tests only (integration skipped)"
     info "Use --integration to also run the live Mem0 suite"

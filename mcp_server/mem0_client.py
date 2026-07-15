@@ -42,9 +42,13 @@ class Mem0Client:
         await self._client.aclose()
 
     async def health(self) -> bool:
-        """Return True iff Mem0 responds 200 on /health."""
+        """Return True iff Mem0 is up and responding.
+
+        Mem0 v1 doesn't expose ``/health``; ``/auth/setup-status`` is a cheap,
+        auth-free endpoint that exercises the same network path.
+        """
         try:
-            r = await self._client.get("/health")
+            r = await self._client.get("/auth/setup-status")
             return r.status_code == 200
         except httpx.HTTPError:
             return False

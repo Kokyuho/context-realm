@@ -130,7 +130,11 @@ services:
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
       # LLM for memory extraction (set MEM0_LLM_PROVIDER + MEM0_LLM_API_KEY in .env)
       MEM0_DEFAULT_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-openai}
+      MEM0_DEFAULT_LLM_MODEL: ${MEM0_DEFAULT_LLM_MODEL:-gpt-4.1-nano-2025-04-14}
       MEM0_LLM_API_KEY: ${MEM0_LLM_API_KEY:-}
+      # pgvector embedding dim — must match what the embedder produces, otherwise
+      # inserts fail with "expected N dimensions, not M" and /memories stays empty.
+      MEM0_EMBEDDING_MODEL_DIMS: ${MEM0_EMBEDDING_MODEL_DIMS:-1024}
       # Disable anonymous telemetry
       MEM0_TELEMETRY: 'false'
       # CORS: allow requests from Open WebUI
@@ -187,8 +191,9 @@ services:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
       NEO4J_server_memory_heap_initial__size: ${NEO4J_server_memory_heap_initial__size:-256m}
       NEO4J_server_memory_heap_max__size: ${NEO4J_server_memory_heap_max__size:-512m}
-      NEO4J_server_memory_pagecache__size: ${NEO4J_server_memory_pagecache__size:-256m}
-      NEO4J_server_memory_off__heap_transaction_max__size: ${NEO4J_server_memory_off__heap_transaction_max__size:-128m}
+      # Neo4j 5.x renamed server.memory.pagecache_size → server.memory.pagecache.size
+      NEO4J_server_memory_pagecache_size: ${NEO4J_server_memory_pagecache_size:-256m}
+      NEO4J_server_memory_off__heap_transaction__max__size: ${NEO4J_server_memory_off__heap_transaction__max__size:-128m}
     volumes:
       - neo4j_data:/data
     networks:

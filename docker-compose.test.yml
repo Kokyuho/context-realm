@@ -1,0 +1,27 @@
+# =============================================================================
+# ContextRealm — Integration test overlay
+# =============================================================================
+# Use with:    docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#              bash scripts/test.sh --integration
+#
+# What it adds:
+#   * Publishes the MCP service on 127.0.0.1:8765:8765 so the integration
+#     smoke tests on the host can hit it directly. Production stacks should
+#     NOT use this overlay — public exposure belongs behind Caddy.
+#
+# Why a separate file?
+#   The base compose file is for production deployment too, and permanently
+#   publishing MCP would mean every deployer exposes a port they don't need.
+#   This overlay opts in to test-mode networking only.
+# =============================================================================
+
+services:
+  mcp:
+    ports:
+      - '127.0.0.1:8765:8765'
+
+  mem0:
+    # Integration tests need to reach Mem0 directly from the host as well,
+    # so they can seed data and verify retrieval through the Mem0 REST API.
+    ports:
+      - '127.0.0.1:8000:8000'

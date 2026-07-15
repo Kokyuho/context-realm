@@ -97,8 +97,8 @@ While pgvector retrieves memories by semantic similarity, Neo4j stores the struc
 ```
 NEO4J_server_memory_heap_initial__size=256m
 NEO4J_server_memory_heap_max__size=512m
-NEO4J_server_memory_pagecache__size=256m
-NEO4J_server_memory_off__heap_transaction_max__size=128m
+NEO4J_server_memory_pagecache_size=256m
+NEO4J_server_memory_off__heap_transaction__max__size=128m
 ```
 
 These are set via `.env` and picked up by `docker-compose.yml`. Increase the values proportionally if more RAM is available.

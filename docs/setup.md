@@ -33,13 +33,33 @@ git clone https://github.com/yourusername/context-realm.git
 cd context-realm
 ```
 
-### 2. Configure environment
+### 2. Initialise the Realm
+
+The fastest path from a fresh checkout to a working stack:
 
 ```bash
-cp .env.example .env
+bash scripts/init-realm.sh --up --models
 ```
 
-Open `.env` and set the following at minimum:
+This one command:
+
+1. Copies `.env.example` → `.env` (only if `.env` is missing).
+2. Generates a fresh `MEM0_ADMIN_API_KEY` (32 bytes, hex) if the placeholder is blank.
+3. Runs `docker compose pull && docker compose up -d` to bring the stack up. First run downloads images (~5–10 min on a typical VPS).
+4. Runs `scripts/setup.sh` to pull the embedding model into Ollama and enable the pgvector extension.
+
+After it returns, open <http://localhost:3000> and you're done. The admin token (`MEM0_ADMIN_API_KEY`) is now the single secret; see [MCP Configuration](#mcp-configuration) for clients that need it.
+
+If you'd rather drive each step manually, skip `--up --models` and just run:
+
+```bash
+bash scripts/init-realm.sh        # .env + token
+docker compose build              # build the local Mem0/Pipeline images
+docker compose pull && docker compose up -d
+bash scripts/setup.sh             # Ollama models + pgvector
+```
+
+Open `.env` and review the secrets before deploying anywhere public:
 
 ```bash
 LITELLM_MASTER_KEY=sk-<random>        # openssl rand -hex 32
@@ -52,42 +72,13 @@ MEM0_VERSION=v0.1.40                  # pin to a specific upstream tag
 
 Add at least one AI provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
-### 3. Build custom images
-
-The Mem0 server and Pipeline images are built locally. Pull and build:
-
-```bash
-docker compose build
-```
-
-This clones the pinned Mem0 upstream release inside the Docker build context — nothing is cloned into this repository.
-
-### 4. Start all services
-
-```bash
-docker compose up -d
-```
-
-Check that all containers are healthy:
+### 3. Confirm the stack is up
 
 ```bash
 docker compose ps
 ```
 
 All services should show `healthy` or `running` within ~60 seconds. Neo4j takes the longest to initialise.
-
-### 5. Run initial setup
-
-Pull the embedding model and enable the pgvector extension:
-
-```bash
-bash scripts/setup.sh
-```
-
-This script:
-
-- Pulls `qwen3-embedding:0.6b` into Ollama (~450 MB, one-time download)
-- Optionally pulls a local LLM (see `OLLAMA_LLM_MODEL` in `.env`)
 - Enables `CREATE EXTENSION IF NOT EXISTS vector` in Postgres
 
 ### 6. Open the UI
@@ -155,8 +146,8 @@ The default Neo4j configuration targets large servers and will exhaust a 4 GB ma
 ```bash
 NEO4J_server_memory_heap_initial__size=256m
 NEO4J_server_memory_heap_max__size=512m
-NEO4J_server_memory_pagecache__size=256m
-NEO4J_server_memory_off__heap_transaction_max__size=128m
+NEO4J_server_memory_pagecache_size=256m
+NEO4J_server_memory_off__heap_transaction__max__size=128m
 ```
 
 Approximate memory budget for 4 GB:
@@ -489,3 +480,23 @@ docker exec contextrealm-postgres-1 \
   psql -U postgres -d mem0 \
   -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
+
+### Running the test suite
+
+```bash
+bash scripts/test.sh                 # unit tests only
+bash scripts/test.sh --lint          # + ruff lint + format check
+bash scripts/test.sh --integration   # + Mem0 + MCP integration suite
+```
+
+Integration tests require the Docker stack. To exercise the MCP endpoints
+in particular, use the test overlay so the MCP service is reachable from
+the host (production compose does not publish its port):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+MCP_TEST_BASE_URL=http://localhost:8765 bash scripts/test.sh --integration
+```
+
+The MCP integration suite skips with a clear message when the service is
+unreachable, so it's safe to leave on by default in CI.

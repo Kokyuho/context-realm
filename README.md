@@ -67,27 +67,38 @@ You ──▶ Open WebUI ──▶ Pipeline (mem0_filter) ──▶ LiteLLM ─�
 
 ### Setup
 
+The fastest path from a fresh checkout to a running Realm:
+
 ```bash
 git clone https://github.com/yourusername/context-realm.git
 cd context-realm
 
-# Configure environment
-cp .env.example .env
-$EDITOR .env   # set passwords and add at least one AI provider API key
-
-# Build custom images and start all services
-docker compose build
-docker compose up -d
-
-# Pull embedding model and initialise the database
-bash scripts/setup.sh
+# One command: .env + admin token + docker compose up + model pull.
+bash scripts/init-realm.sh --up --models
 
 # Open the UI
 open http://localhost:3000
+```
+
+The init script copies `.env.example → .env`, generates a `MEM0_ADMIN_API_KEY`
+(the only secret your MCP clients will ever need), runs `docker compose up -d`,
+and pulls the embedding model. Run `bash scripts/init-realm.sh --help` for the
+full set of flags.
+
+Prefer step-by-step control? Run them by hand:
+
+```bash
+cp .env.example .env
+$EDITOR .env                    # set passwords + add an AI provider key
+docker compose build
+docker compose up -d
+bash scripts/setup.sh           # Ollama model pull + pgvector
+```
+
+→ Full walkthrough in [docs/setup.md](docs/setup.md)
 
 # Run the test suite (unit tests by default; --integration for live Mem0 checks)
 bash scripts/test.sh
-```
 
 → Full walkthrough in [docs/setup.md](docs/setup.md)
 

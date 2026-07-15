@@ -388,6 +388,192 @@ class TestMetadataMerging:
         import_file(p, user_id="u", tag=None, client=client, chunk_size=1000, chunk_overlap=0)
         assert client.add_memory.call_args.kwargs["metadata"]["tag"] == "fm-tag"
 
+
+# ─── CLI ─────────────────────────────────────────────────────────────────────
+#
+# The CLI surface is where most operator-facing bugs live. We exercise:
+#
+#   * Exit codes: 0 = success, 1 = some chunks/files failed, 2 = no files
+#     discovered, 3 = Mem0 unreachable.
+#   * argparse defaults resolving to MEM0_* env vars.
+#   * Mutually-exclusive source arguments.
+#   * Failure paths surfaced clearly enough to alert on.
+#
+# We patch httpx.get (the script uses the module, not a client object, for
+# the health probe) and Mem0Client.add_memory. The intent is to lock in
+# the CLI's behaviour at the seam between human input and module-level
+# functions, not to retest the chunker or HTTP shape (those live in the
+# TestImportFile / TestMem0Client classes).
+
+
+class TestCLI:
+    """End-to-end tests of ``main(argv)`` with patching at the network seam."""
+
+    @staticmethod
+    def _write_md(path: Path, body: str) -> None:
+        path.write_text(body, encoding="utf-8")
+
+    def _run_cli(self, *argv: str, monkeypatch, tmp_path: Path) -> int:
+        """Invoke the CLI's main() with the given argv. Returns exit code.
+
+        The CLI uses ``import_context.httpx.get`` for the health probe; we
+        stub it here so no real network call happens.
+        """
+        monkeypatch.setattr(
+            import_context.httpx,
+            "get",
+            MagicMock(return_value=MagicMock(status_code=200)),
+        )
+        return import_context.main(list(argv))
+
+    def test_success_exit_code(self, monkeypatch, tmp_path: Path) -> None:
+        md = tmp_path / "notes.md"
+        self._write_md(md, "hello world")
+        fake_client = MagicMock()
+        fake_client.add_memory.return_value = {}
+        monkeypatch.setattr(import_context, "Mem0Client", lambda **kw: fake_client)
+        code = self._run_cli(
+            "--file",
+            str(md),
+            "--user",
+            "u",
+            "--api-url",
+            "http://m:8000",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+        )
+        assert code == 0
+        assert fake_client.add_memory.call_count == 1
+
+    def test_no_files_discovered_returns_code_2(self, monkeypatch, tmp_path: Path) -> None:
+        # Point at a nonexistent path → discover_files returns [] → exit 2.
+        # (An empty file is *discovered* by discover_files; it's import_file
+        # that ignores it without counting it as processed.)
+        missing = tmp_path / "nope.md"
+        code = self._run_cli(
+            "--file",
+            str(missing),
+            "--user",
+            "u",
+            "--api-url",
+            "http://m:8000",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+        )
+        assert code == 2
+
+    def test_mem0_unreachable_returns_code_3(self, monkeypatch, tmp_path: Path) -> None:
+        # Patch the health probe to raise so the CLI's fail-fast path
+        # (exit code 3) fires before any import work happens. We avoid the
+        # network entirely so test environments without outbound network
+        # access see the same behaviour as ones with it.
+        import httpx
+
+        md = tmp_path / "notes.md"
+        self._write_md(md, "hello")
+        # Bypass _run_cli's auto-patch; we want httpx.get to raise, not succeed.
+        monkeypatch.setattr(
+            import_context.httpx,
+            "get",
+            MagicMock(side_effect=httpx.ConnectError("refused")),
+        )
+        code = import_context.main(
+            ["--file", str(md), "--user", "u", "--api-url", "http://m:8000"],
+        )
+        assert code == 3
+
+    def test_chunk_failure_returns_code_1(self, monkeypatch, tmp_path: Path) -> None:
+        md = tmp_path / "notes.md"
+        self._write_md(md, "hello")
+        fake_client = MagicMock()
+        fake_client.add_memory.side_effect = Mem0Error("503 service unavailable")
+        monkeypatch.setattr(import_context, "Mem0Client", lambda **kw: fake_client)
+        code = self._run_cli(
+            "--file",
+            str(md),
+            "--user",
+            "u",
+            "--api-url",
+            "http://m:8000",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+        )
+        # chunks_failed increments → exit 1, not 0.
+        assert code == 1
+
+    def test_missing_source_argument_exits_usage_error(self, monkeypatch, tmp_path: Path) -> None:
+        # argparse rejects missing required --file/--dir with SystemExit(2).
+        with pytest.raises(SystemExit) as exc_info:
+            import_context.main([])
+        assert exc_info.value.code == 2
+
+    def test_mutually_exclusive_source_arguments(self, monkeypatch, tmp_path: Path) -> None:
+        # Passing both --file and --dir is a usage error.
+        md = tmp_path / "notes.md"
+        self._write_md(md, "hello")
+        with pytest.raises(SystemExit) as exc_info:
+            import_context.main(["--file", str(md), "--dir", str(tmp_path)])
+        assert exc_info.value.code == 2
+
+    def test_argparse_defaults_take_from_env_when_flag_missing(self, monkeypatch) -> None:
+        # Pure argparse-layer test — no file I/O, just inspect the parser.
+        monkeypatch.setenv("MEM0_USER_ID", "env-user")
+        monkeypatch.setenv("MEM0_API_URL", "http://env-host:9000")
+        monkeypatch.setenv("MEM0_ADMIN_API_KEY", "env-key")
+        ns = import_context.build_parser().parse_args(["--file", "x"])
+        assert ns.user == "env-user"
+        assert ns.api_url == "http://env-host:9000"
+        assert ns.api_key == "env-key"
+
+    def test_chunk_failures_dont_abort_other_files(self, monkeypatch, tmp_path: Path) -> None:
+        # One file's chunk fails, the next file still gets imported.
+        md1 = tmp_path / "first.md"
+        md2 = tmp_path / "second.md"
+        self._write_md(md1, "alpha")
+        self._write_md(md2, "beta")
+
+        fake_client = MagicMock()
+        # First call (first.md) raises; second call (second.md) succeeds.
+        fake_client.add_memory.side_effect = [
+            Mem0Error("transient 503"),
+            {},
+        ]
+        monkeypatch.setattr(import_context, "Mem0Client", lambda **kw: fake_client)
+        code = self._run_cli(
+            "--dir",
+            str(tmp_path),
+            "--user",
+            "u",
+            "--api-url",
+            "http://m:8000",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+        )
+        assert code == 1  # at least one chunk failed
+        # Both files attempted, one chunk per file with default chunk size.
+        assert fake_client.add_memory.call_count == 2
+
+    def test_verbose_flag_does_not_break_invocation(self, monkeypatch, tmp_path: Path) -> None:
+        # We don't introspect the log level; the test passes if main()
+        # doesn't crash under -v and behaves the same as without it.
+        md = tmp_path / "notes.md"
+        self._write_md(md, "hi")
+        fake_client = MagicMock()
+        fake_client.add_memory.return_value = {}
+        monkeypatch.setattr(import_context, "Mem0Client", lambda **kw: fake_client)
+        code = self._run_cli(
+            "--file",
+            str(md),
+            "--user",
+            "u",
+            "--api-url",
+            "http://m:8000",
+            "-v",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+        )
+        assert code == 0
+
     def test_tags_list_first_value_used(self, tmp_path: Path) -> None:
         p = tmp_path / "doc.md"
         p.write_text(

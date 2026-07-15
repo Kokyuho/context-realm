@@ -63,7 +63,19 @@ RUN grep -q '"ollama"' /mem0/server/main.py || { \
 #           OLLAMA_EMBEDDING_MODEL          (default: qwen3-embedding:0.6b)
 #           OLLAMA_BASE_URL                 (default: http://ollama:11434)
 # LLM:      MEM0_DEFAULT_LLM_PROVIDER       (default: openai)
+#           MEM0_DEFAULT_LLM_MODEL          (default: gpt-4.1-nano-2025-04-14)
 #           MEM0_LLM_API_KEY                (falls back to OPENAI_API_KEY)
+#
+# When MEM0_DEFAULT_LLM_PROVIDER=ollama, both the embedder and the LLM blocks
+# get ``ollama_base_url`` injected — without that key on the LLM block, Mem0's
+# Ollama LLM client silently fails to connect during fact extraction.
+#
+# Vector store: MEM0_EMBEDDING_MODEL_DIMS  (default: 1024)
+# Upstream PGVectorConfig.embedding_model_dims defaults to 1536, which silently
+# breaks inserts whenever the embedder is not OpenAI's text-embedding-3-small.
+# Without this injection, POST /memories returns 200 with new IDs but the row
+# never lands in pgvector (column is ``vector(1536)``, insert vector is 1024),
+# and GET /memories returns an empty list.
 COPY patch3.py /tmp/patch3.py
 RUN python3 /tmp/patch3.py && rm /tmp/patch3.py
 

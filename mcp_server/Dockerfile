@@ -18,14 +18,21 @@ RUN useradd --create-home --shell /bin/bash mcp
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# Copy *into* a subdirectory so the package layout matches what the source
+# code expects (``from mcp_server.mem0_client import ...``). The build
+# context is ./mcp_server/, so we COPY its contents into /app/mcp_server/.
+COPY requirements.txt /app/mcp_server/requirements.txt
+COPY --chown=mcp:mcp . /app/mcp_server/
 
-COPY --chown=mcp:mcp . /app
+# Install the package. ``pip install .`` is overkill; instead we add
+# /app/mcp_server to PYTHONPATH so the source imports resolve, and
+# install the third-party deps via requirements.txt.
+RUN pip install --no-cache-dir -r /app/mcp_server/requirements.txt
 
 USER mcp
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/mcp_server \
     MCP_HOST=0.0.0.0 \
     MCP_PORT=8765
 
